@@ -28,7 +28,7 @@ fn type_parser() -> impl Parser<char, ast::Ty, Error = Simple<char>> {
             .then_ignore(just(">"))
             .map(|v| ast::Ty::VectorTy(Box::new(v)));
 
-        atom_ty.or(tuple_ty).or(vector_ty)
+        atom_ty.or(tuple_ty).or(vector_ty).boxed()
     })
 }
 
@@ -63,6 +63,7 @@ fn named_tuple_parser() -> impl Parser<char, ast::NamedTuple, Error = Simple<cha
     name.padded()
         .then(fields)
         .map(|(name, fields)| ast::NamedTuple { name, fields })
+        .boxed()
 }
 
 fn named_tuple_parser_new(datatype_name : String) -> impl Parser<char, ast::NamedTuple, Error = Simple<char>>{
@@ -81,7 +82,7 @@ fn named_tuple_parser_new(datatype_name : String) -> impl Parser<char, ast::Name
     name.padded()
         .then(fields)
         .map(|(name, fields)| ast::NamedTuple { name : name, fields })
-
+        .boxed()
 }
 
 
@@ -150,6 +151,7 @@ fn impl_block_parser() -> impl Parser<char, ast::ImplBlock, Error = Simple<char>
             data,
             realize,
         })
+        .boxed()
 }
 
 fn trans_block_parser() -> impl Parser<char, ast::TransitionBlock, Error = Simple<char>> {
@@ -192,6 +194,7 @@ fn trans_block_parser() -> impl Parser<char, ast::TransitionBlock, Error = Simpl
                 cost,
             },
         )
+        .boxed()
 }
 
 fn method_name() -> impl Parser<char, String, Error = Simple<char>> {
@@ -253,32 +256,46 @@ fn data_type_parser() -> impl Parser<char, ast::DataType, Error = Simple<char>> 
 fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
     recursive(|expr_parser| {
         let float_literal = float_parser().map(ast::Expr::FloatLiteral).boxed();
+        
         let location_literal = just("Location")
             .ignore_then(text::int(10).delimited_by(just("("), just(")")))
-            .map(|i: String| ast::Expr::LocationLiteral(i.parse().unwrap()));
+            .map(|i: String| ast::Expr::LocationLiteral(i.parse().unwrap()))
+            .boxed();
+        
         let empty_vec = just("Vec")
             .ignore_then(just("()"))
-            .map(|_| ast::Expr::EmptyVec);
-        let index_literal =
-            text::int(10).map(|i: String| ast::Expr::IndexLiteral(i.parse().unwrap()));
-        let ident = text::ident().map(ast::Expr::Ident);
+            .map(|_| ast::Expr::EmptyVec)
+            .boxed();
+        
+        let index_literal = text::int(10)
+            .map(|i: String| ast::Expr::IndexLiteral(i.parse().unwrap()))
+            .boxed();
+        
+        let ident = text::ident().map(ast::Expr::Ident).boxed();
+        
         let tuple = expr_parser
             .clone()
             .separated_by(just(",").padded())
             .at_least(1)
             .delimited_by(just("("), just(")"))
-            .map(ast::Expr::Tuple);
+            .map(ast::Expr::Tuple)
+            .boxed();
+        
         let some_expr = just("Some")
             .ignore_then(expr_parser.clone().delimited_by(just("("), just(")")))
-            .map(|expr: ast::Expr| ast::Expr::SomeExpr(Box::new(expr)));
-        let none_expr = just("None").map(|_| ast::Expr::NoneExpr);
+            .map(|expr: ast::Expr| ast::Expr::SomeExpr(Box::new(expr)))
+            .boxed();
+        
+        let none_expr = just("None").map(|_| ast::Expr::NoneExpr).boxed();
+        
         let swap_pair = keyword("value_swap")
             .ignore_then(just("("))
             .ignore_then(expr_parser.clone())
             .then_ignore(just(",").padded())
             .then(expr_parser.clone())
             .then_ignore(just(")"))
-            .map(|(a, b)| ast::Expr::SwapPair(Box::new(a), Box::new(b)));
+            .map(|(a, b)| ast::Expr::SwapPair(Box::new(a), Box::new(b)))
+            .boxed();
 
         let map_iter = just("map(|")
             .ignore_then(text::ident())
@@ -292,7 +309,9 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
                 container: Box::new(container),
                 bound_var: ident,
                 func: Box::new(func),
-            });
+            })
+            .boxed();
+        
         let fold = just("fold(")
             .padded()
             .ignore_then(expr_parser.clone().padded())
@@ -306,13 +325,15 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
                 container: Box::new(container),
                 init: Box::new(init),
                 func: Box::new(func),
-            });
+            })
+            .boxed();
 
         let container_atom = choice((
-            ident,
+            ident.clone(),
             map_iter.clone(),
             expr_parser.clone().delimited_by(just("("), just(")")),
-        ));
+        )).boxed();
+        
         let append = container_atom
             .clone()
             .then_ignore(just(".push").padded())
@@ -320,7 +341,8 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
             .map(|(vec, elem)| ast::Expr::Append {
                 vec: Box::new(vec),
                 elem: Box::new(elem),
-            });
+            })
+            .boxed();
 
         let extend = container_atom
             .clone()
@@ -329,7 +351,9 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
             .map(|(vec, elem)| ast::Expr::Extend {
                 vec1: Box::new(vec),
                 vec2: Box::new(elem),
-            });
+            })
+            .boxed();
+        
         let access_chain = recursive(|access_chain_parser| {
             let array_access = expr_parser
                 .clone()
@@ -347,25 +371,32 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
             (array_access.or(tuple_access))
                 .or_not()
                 .map(|c| Box::new(c.unwrap_or(ast::AccessChain::Nil)))
+                .boxed()
         });
+        
         let access_expr = text::ident()
             .then(access_chain)
-            .map(|(id, ac)| ast::AccessExpr::Access(id, ac));
+            .map(|(id, ac)| ast::AccessExpr::Access(id, ac))
+            .boxed();
+        
         let get_data = data_type_parser()
             .then_ignore(just("."))
             .then(access_expr.clone())
-            .map(|(d, access)| ast::Expr::GetData { d, access });
+            .map(|(d, access)| ast::Expr::GetData { d, access })
+            .boxed();
 
         let get_anon_data = text::ident()
             .then_ignore(just("."))
             .then(access_expr.clone())
-            .map(|(ident, access)| ast::Expr::GetAnonData { ident, access });
+            .map(|(ident, access)| ast::Expr::GetAnonData { ident, access })
+            .boxed();
 
         let map_access = just("Step.map")
             .ignore_then(just("["))
             .ignore_then(expr_parser.clone())
             .then_ignore(just("]"))
-            .map(|x| ast::Expr::MapAccess(Box::new(x)));
+            .map(|x| ast::Expr::MapAccess(Box::new(x)))
+            .boxed();
 
         let call_method = data_type_parser()
             .then_ignore(just("."))
@@ -373,13 +404,15 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
             .then_ignore(just("("))
             .then(expr_parser.clone().separated_by(just(",").padded()))
             .then_ignore(just(")"))
-            .map(|((d, method), args)| ast::Expr::CallMethod { d, method, args });
+            .map(|((d, method), args)| ast::Expr::CallMethod { d, method, args })
+            .boxed();
 
         let call_function = method_name()
             .then_ignore(just("(").padded())
             .then(expr_parser.clone().separated_by(just(",").padded()))
             .then_ignore(just(")").padded())
-            .map(|(func, args)| ast::Expr::CallFunction { func, args });
+            .map(|(func, args)| ast::Expr::CallFunction { func, args })
+            .boxed();
 
         let ite = keyword("if")
             .padded()
@@ -397,16 +430,19 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
                 cond: Box::new(cond),
                 then: Box::new(then),
                 els: Box::new(els),
-            });
+            })
+            .boxed();
 
         let some_arm = just("Some")
             .ignore_then(text::ident().delimited_by(just("("), just(")")))
             .ignore_then(just("=>"))
-            .ignore_then(expr_parser.clone());
+            .ignore_then(expr_parser.clone())
+            .boxed();
 
         let none_arm = just("None")
             .ignore_then(just("=>").padded())
-            .ignore_then(expr_parser.clone());
+            .ignore_then(expr_parser.clone())
+            .boxed();
 
         let option_match_some_first = just("match")
             .ignore_then(expr_parser.clone().padded())
@@ -419,7 +455,9 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
                 expr: Box::new(expr),
                 some_arm: Box::new(some_arm),
                 none_arm: Box::new(none_arm),
-            });
+            })
+            .boxed();
+        
         let option_match_none_first = just("match")
             .ignore_then(expr_parser.clone())
             .then_ignore(just("{"))
@@ -431,8 +469,11 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
                 expr: Box::new(expr),
                 some_arm: Box::new(some_arm),
                 none_arm: Box::new(none_arm),
-            });
-        let option_match = choice((option_match_some_first, option_match_none_first));
+            })
+            .boxed();
+        
+        let option_match = choice((option_match_some_first, option_match_none_first)).boxed();
+        
         let assign = just("=").padded();
         let assignment_parser = text::ident()
             .padded()
@@ -440,21 +481,24 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
             .then(expr_parser.clone())
             .separated_by(just(",").padded())
             .at_least(1)
-            .map(|assignments| assignments.into_iter().collect::<Vec<_>>());
+            .map(|assignments| assignments.into_iter().collect::<Vec<_>>())
+            .boxed();
 
         let trans_cons = keyword("Transition")
             .padded()
             .ignore_then(just("{").padded())
             .ignore_then(assignment_parser.clone())
             .then_ignore(just("}").padded())
-            .map(ast::Expr::TransitionConstructor);
+            .map(ast::Expr::TransitionConstructor)
+            .boxed();
 
         let impl_cons = keyword("GateRealization")
             .padded()
             .ignore_then(just("{").padded())
             .ignore_then(assignment_parser.clone())
             .then_ignore(just("}").padded())
-            .map(ast::Expr::ImplConstructorExpr);
+            .map(ast::Expr::ImplConstructorExpr)
+            .boxed();
 
         let atom = choice((
             float_literal.clone(),
@@ -462,19 +506,23 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
             ident.clone(),
             tuple.clone(),
             expr_parser.clone().delimited_by(just("("), just(")")),
-        ));
+        )).boxed();
+        
         let bin_op = atom
             .then(bin_op_parser().padded())
             .then(expr_parser.clone())
-            .map(|((a, op), b)| ast::Expr::BinOp(op, Box::new(a), Box::new(b)));
+            .map(|((a, op), b)| ast::Expr::BinOp(op, Box::new(a), Box::new(b)))
+            .boxed();
+        
         let range = just("range(")
             .ignore_then(expr_parser.clone())
             .then_ignore(just(".."))
             .then(expr_parser.clone())
             .then_ignore(just(")"))
-            .map(|(bot, top)| ast::Expr::RangeExpr { bot : Box::new(bot), top : Box::new(top) });
+            .map(|(bot, top)| ast::Expr::RangeExpr { bot : Box::new(bot), top : Box::new(top) })
+            .boxed();
 
-        let expr = choice((
+        choice((
             bin_op,
             range,
             ite,
@@ -499,9 +547,8 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
             none_expr,
             tuple,
             ident,
-        ));
-        expr
-    })
+        ))
+    }).boxed()
 }
 
 fn parser() -> impl Parser<char, ProblemDefinition, Error = Simple<char>> {
