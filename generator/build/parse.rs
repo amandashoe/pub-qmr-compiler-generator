@@ -390,8 +390,7 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
             .then(access_expr.clone())
             .map(|(ident, access)| ast::Expr::GetAnonData { ident, access })
             .boxed();
-
-            .ignorenthnn(just("[)
+        let map_access = just("State.map")
             .ignore_then(just("["))
             .ignore_then(expr_parser.clone())
             .then_ignore(just("]"))
