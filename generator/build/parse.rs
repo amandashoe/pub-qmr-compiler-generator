@@ -234,7 +234,7 @@ fn step_block_parser() -> impl Parser<char, Option<ast::StepBlock>, Error = Simp
         .ignore_then(just("="))
         .ignore_then(expr_parser())
         .padded();
-    keyword("StepInfo")
+    keyword("StateInfo")
         .padded()
         .then_ignore(just(":"))
         .padded()
@@ -250,7 +250,7 @@ fn data_type_parser() -> impl Parser<char, ast::DataType, Error = Simple<char>> 
         .or(keyword("Transition").map(|_| ast::DataType::Transition))
         .or(keyword("Impl").map(|_| ast::DataType::Impl))
         .or(keyword("Gate").map(|_| ast::DataType::Gate))
-        .or(keyword("Step").map(|_| ast::DataType::Step))
+        .or(keyword("State").map(|_| ast::DataType::Step))
 }
 
 fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
@@ -391,7 +391,7 @@ fn expr_parser() -> impl Parser<char, ast::Expr, Error = Simple<char>> {
             .map(|(ident, access)| ast::Expr::GetAnonData { ident, access })
             .boxed();
 
-        let map_access = just("Step.map")
+            .ignorenthnn(just("[)
             .ignore_then(just("["))
             .ignore_then(expr_parser.clone())
             .then_ignore(just("]"))

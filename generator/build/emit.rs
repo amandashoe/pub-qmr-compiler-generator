@@ -457,7 +457,7 @@ fn emit_step_cost(p: &ProblemDefinition) -> TokenStream {
         Some(s) => {
             let step_cost_expr = emit_expr(
                 &s.cost,
-                &Context::DataTypeContext(DataType::Step),
+                &Context::Free,
                 &trans_struct_name,
                 &imp_struct_name,
                 None,

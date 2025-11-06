@@ -1,8 +1,8 @@
 RouteInfo:
     routed_gates = CX
     GateRealization{u : Location, v : Location}
-    realize_gate = if Arch.contains_edge((Step.map[Gate.qubits[0]],Step.map[Gate.qubits[1]]))
-            then Some(GateRealization{u = Step.map[Gate.qubits[0]],v = Step.map[Gate.qubits[1]]})
+    realize_gate = if Arch.contains_edge((State.map[Gate.qubits[0]],State.map[Gate.qubits[1]]))
+            then Some(GateRealization{u = State.map[Gate.qubits[0]],v = State.map[Gate.qubits[1]]})
             else None
 
 
