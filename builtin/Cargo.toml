@@ -9,5 +9,6 @@ petgraph = "0.7.1"
 rustworkx-core = "0.16.0"
 serde = "1.0.217"
 serde_json = "1.0.138"
+rand = "0.8"
 solver = { path = "../solver" }
 

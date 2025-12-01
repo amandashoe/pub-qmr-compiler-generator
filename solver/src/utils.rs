@@ -130,6 +130,7 @@ pub fn extract_gates(filename: &str, gate_types: &[&str]) -> Circuit {
         );
         patterns.push(cx_pattern);
     }
+
     if gate_types.contains(&"T") {
         let t_pattern = (
             Regex::new(r"(t|tdg)\s+q\[(\d+)\];").unwrap(),
@@ -147,6 +148,78 @@ pub fn extract_gates(filename: &str, gate_types: &[&str]) -> Circuit {
         );
 
         patterns.push(t_pattern);
+    } else if gate_types.contains(&"TComposite") {
+        let t_pattern = (
+            Regex::new(r"(t|tdg)\s+q\[(\d+)\];").unwrap(),
+            Box::new(
+                |c: &regex::Captures, qubits: &mut HashSet<Qubit>, id: usize| {
+                    let q = Qubit::new(c.get(2).unwrap().as_str().parse::<usize>().unwrap());
+                    qubits.insert(q);
+                    Gate {
+                        operation: Operation::TComposite,
+                        qubits: vec![q],
+                        id,
+                    }
+                },
+            ) as GateHandler,
+        );
+
+        patterns.push(t_pattern);
+    }
+
+    if gate_types.contains(&"S") {
+        let s_pattern = (
+            Regex::new(r"(s)\s+q\[(\d+)\];").unwrap(),
+            Box::new(
+                |c: &regex::Captures, qubits: &mut HashSet<Qubit>, id: usize| {
+                    let q = Qubit::new(c.get(2).unwrap().as_str().parse::<usize>().unwrap());
+                    qubits.insert(q);
+                    Gate {
+                        operation: Operation::S,
+                        qubits: vec![q],
+                        id,
+                    }
+                },
+            ) as GateHandler,
+        );
+
+        patterns.push(s_pattern);
+    }
+
+    if gate_types.contains(&"H") {
+        let h_pattern = (
+            Regex::new(r"(h)\s+q\[(\d+)\];").unwrap(),
+            Box::new(
+                |c: &regex::Captures, qubits: &mut HashSet<Qubit>, id: usize| {
+                    let q = Qubit::new(c.get(2).unwrap().as_str().parse::<usize>().unwrap());
+                    qubits.insert(q);
+                    Gate {
+                        operation: Operation::H,
+                        qubits: vec![q],
+                        id,
+                    }
+                },
+            ) as GateHandler,
+        );
+
+        patterns.push(h_pattern);
+    } else if gate_types.contains(&"HLitinski") {
+        let h_pattern = (
+            Regex::new(r"(h)\s+q\[(\d+)\];").unwrap(),
+            Box::new(
+                |c: &regex::Captures, qubits: &mut HashSet<Qubit>, id: usize| {
+                    let q = Qubit::new(c.get(2).unwrap().as_str().parse::<usize>().unwrap());
+                    qubits.insert(q);
+                    Gate {
+                        operation: Operation::HLitinski,
+                        qubits: vec![q],
+                        id,
+                    }
+                },
+            ) as GateHandler,
+        );
+
+        patterns.push(h_pattern);
     }
 
     if gate_types.contains(&"Pauli") {
@@ -305,6 +378,57 @@ pub fn graph_from_json_entry(entry: Value) -> Graph<Location, ()> {
     return graph_from_edge_vec(edges);
 }
 
+pub fn patches_from_json_entry(entry: Value) -> Vec<Patch> {
+    entry
+        .as_array()
+        .expect("expected array of patches")
+        .iter()
+        .map(|inner| {
+            let object = inner.as_object().expect("expected patch object");
+            Patch {
+                qubit: Qubit::new(object["name"].as_u64().expect("name should be int") as usize),
+                top_bottom: match object["top_bottom"]
+                    .as_str()
+                    .expect("boundary type should be string")
+                {
+                    "X" => Some(BoundaryType::X),
+                    "Z" => Some(BoundaryType::Z),
+                    "" => None,
+                    _ => panic!("invalid boundary type"),
+                },
+                patch_type: match object["patch_type"]
+                    .as_str()
+                    .expect("patch type should be string")
+                {
+                    "ALGORITHM" => PatchType::ALGORITHM,
+                    "ANCILLA" => PatchType::ANCILLA,
+                    "MAGIC_T" => PatchType::MAGICT,
+                    _ => panic!("invalid patch type"),
+                },
+            }
+        })
+        .collect()
+}
+
+pub fn initial_map_from_json(entry: Value) -> Option<QubitMap> {
+    if entry.is_null() {
+        return None;
+    }
+
+    let mut qubit_map = HashMap::new();
+    entry
+        .as_object()
+        .expect("should be dict")
+        .iter()
+        .for_each(|(k, v)| {
+            qubit_map.insert(
+                Qubit::new(str::parse::<usize>(k).unwrap()),
+                Location::new((*v).as_u64().expect("name should be int") as usize),
+            );
+        });
+    return Some(qubit_map);
+}
+
 pub fn vertical_neighbors(loc: Location, width: usize, height: usize) -> Vec<Location> {
     let mut neighbors = Vec::new();
     if loc.get_index() / width > 0 {
@@ -341,6 +465,99 @@ pub fn swap_keys(
         }
     }
     return new_map;
+}
+
+pub fn rotate(
+    map: &HashMap<Qubit, Location>,
+    patch_map: &HashMap<Qubit, Patch>,
+    loc1: Location,
+) -> HashMap<Qubit, Patch> {
+    let mut new_map = patch_map.clone();
+    for (qubit, loc) in map {
+        if loc == &loc1 {
+            new_map.insert(
+                *qubit,
+                Patch {
+                    qubit: patch_map[qubit].qubit,
+                    top_bottom: match patch_map[qubit].top_bottom {
+                        Some(BoundaryType::X) => Some(BoundaryType::Z),
+                        Some(BoundaryType::Z) => Some(BoundaryType::X),
+                        None => None,
+                    },
+                    patch_type: patch_map[qubit].patch_type,
+                },
+            );
+        }
+    }
+    return new_map;
+}
+
+pub fn magic_t_init(
+    map: &HashMap<Qubit, Location>,
+    patch_map: &HashMap<Qubit, Patch>,
+    loc: Location,
+    basis: BoundaryType,
+) -> HashMap<Qubit, Patch> {
+    let mut new_map = patch_map.clone();
+    for (qubit, map_loc) in map {
+        if map_loc == &loc {
+            new_map.insert(
+                *qubit,
+                Patch {
+                    qubit: patch_map[qubit].qubit,
+                    top_bottom: Some(basis),
+                    patch_type: PatchType::MAGICT,
+                },
+            );
+        }
+    }
+    return new_map;
+}
+
+pub fn magic_t_reset(
+    map: &HashMap<Qubit, Location>,
+    patch_map: &HashMap<Qubit, Patch>,
+    loc1: Location,
+) -> HashMap<Qubit, Patch> {
+    let mut new_map = patch_map.clone();
+    for (qubit, loc) in map {
+        if loc == &loc1 {
+            new_map.insert(
+                *qubit,
+                Patch {
+                    qubit: patch_map[qubit].qubit,
+                    top_bottom: None,
+                    patch_type: PatchType::ANCILLA,
+                },
+            );
+        }
+    }
+    return new_map;
+}
+
+pub fn get_key(map: &HashMap<Qubit, Location>, loc: Location) -> Option<Qubit> {
+    let mut key = None;
+    for (qubit, map_loc) in map {
+        if map_loc == &loc {
+            key = Some(*qubit);
+        }
+    }
+    return key;
+}
+
+pub fn alg_qubit_locs(
+    map: &HashMap<Qubit, Location>,
+    patch_map: &HashMap<Qubit, Patch>,
+) -> Vec<Location> {
+    let mut result = Vec::new();
+    for (qubit, loc) in map {
+        if patch_map[qubit].patch_type == PatchType::ALGORITHM
+            || patch_map[qubit].patch_type == PatchType::MAGICT
+        {
+            result.push(*loc);
+        }
+    }
+    return result;
 }
 
 pub fn push_and_return<T: Clone, C: Clone + IntoIterator<Item = T>>(coll: C, item: T) -> Vec<T> {
@@ -407,6 +624,9 @@ pub fn identity_application<T: GateImplementation>(step: &Step<T>) -> Step<T> {
     return Step {
         implemented_gates: HashSet::new(),
         map: step.map.clone(),
+        patch_map: step.patch_map.clone(),
+        counter_map: step.counter_map.clone(),
+        time: step.time,
     };
 }
 pub fn all_paths<A: Architecture>(
@@ -416,12 +636,18 @@ pub fn all_paths<A: Architecture>(
     blocked: Vec<Location>,
 ) -> impl Iterator<Item = Vec<Location>> {
     let (mut graph, mut loc_to_node) = arch.graph();
+    // TODO: sometimes this max_length too big and causes slowdown I think
     let max_length = graph.node_count();
+    // let max_length = 20;
+
     for loc in blocked.iter() {
-        let old_last = graph[graph.node_indices().last().unwrap()];
-        graph.remove_node(loc_to_node[loc]);
-        loc_to_node.insert(old_last, loc_to_node[loc]);
-        loc_to_node.remove(loc);
+        // TODO: revisit. Is this check because blocked is not a set
+        if let Some(node_idx) = loc_to_node.get(loc) {
+            let old_last = graph[graph.node_indices().last().unwrap()];
+            graph.remove_node(*node_idx);
+            loc_to_node.insert(old_last, *node_idx);
+            loc_to_node.remove(loc);
+        }
     }
 
     let unblocked_starts: Vec<_> = starts
@@ -550,14 +776,16 @@ impl Iterator for SteinerTreesIter {
 
             let steiner_tree_res = steiner_tree(&self.graph, &indices, |_| Ok::<f64, ()>(1.0));
 
+            // some modifications to return terminals as well
             if let Ok(Some(tree)) = steiner_tree_res {
-                let locations = tree
+                let locations: Vec<Location> = tree
                     .used_node_indices
                     .into_iter()
                     .map(|n| &self.graph[NodeIndex::new(n)])
+                    .filter(|loc| !terminal_set.contains(loc))
                     .cloned()
                     .collect();
-                return Some(locations);
+                return Some(terminal_set.into_iter().cloned().chain(locations).collect());
             }
         }
         None
@@ -619,7 +847,7 @@ pub fn build_interaction_graph(c: &Circuit) -> Graph<Qubit, usize> {
     }
     for gate in &c.gates {
         match &gate.operation {
-            Operation::CX => {
+            Operation::CX | Operation::Move | Operation::MoveRotate => {
                 let (ctrl, tar) = (gate.qubits[0], gate.qubits[1]);
                 let (ctrl_loc, tar_loc) = (
                     nodes
@@ -632,7 +860,17 @@ pub fn build_interaction_graph(c: &Circuit) -> Graph<Qubit, usize> {
                 g.update_edge(*ctrl_loc, *tar_loc, 0);
                 g.update_edge(*tar_loc, *ctrl_loc, 0);
             }
-            Operation::T => continue,
+            Operation::T
+            | Operation::TComposite
+            | Operation::CultivateTX
+            | Operation::CultivateTZ
+            | Operation::S
+            | Operation::H
+            | Operation::HLitinski
+            | Operation::ResetToAncilla
+            | Operation::LitinskiRotate
+            | Operation::Id
+            | Operation::Walk => continue,
             Operation::PauliRot { axis, angle: _ }
             | Operation::PauliMeasurement { sign: _, axis } => {
                 // Iterate through all pairs of indices where the axis isn't PauliI
