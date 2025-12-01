@@ -52,6 +52,9 @@ pub struct SolverConfig {
 
     #[serde(default = "default_limited_search_cool_rates")]
     pub limited_search_cool_rates: [f64; 4],
+
+    #[serde(default = "default_transitions_allowed")]
+    pub transitions_allowed: Vec<String>,
 }
 
 impl Default for SolverConfig {
@@ -73,6 +76,7 @@ impl Default for SolverConfig {
             isom_search_timeout: default_isom_search_timeout(),
             parallel_searches: default_parallel_searches(),
             limited_search_cool_rates: default_limited_search_cool_rates(),
+            transitions_allowed: default_transitions_allowed(),
         };
     }
 }
@@ -139,6 +143,11 @@ fn default_parallel_searches() -> usize {
 fn default_limited_search_cool_rates() -> [f64; 4] {
     return [0.0, 0.349, 0.99, 0.9];
 }
+
+fn default_transitions_allowed() -> Vec<String> {
+    return vec![];
+}
+
 pub static CONFIG: Lazy<SolverConfig> = Lazy::new(|| {
     let data = fs::read_to_string("config.json").unwrap_or_else(|_| "".to_string());
     serde_json::from_str(&data).unwrap_or_else(|_| SolverConfig::default())

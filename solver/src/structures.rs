@@ -26,6 +26,26 @@ impl Qubit {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Copy, Serialize)]
+pub enum PatchType {
+    ALGORITHM,
+    ANCILLA,
+    MAGICT,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Copy, Serialize)]
+pub enum BoundaryType {
+    X,
+    Z,
+}
+
+#[derive(Hash, PartialEq, Eq, Clone, Copy, Debug, Serialize)]
+pub struct Patch {
+    pub qubit: Qubit,
+    pub top_bottom: Option<BoundaryType>,
+    pub patch_type: PatchType,
+}
+
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Location(usize);
 
@@ -103,6 +123,8 @@ impl Div<usize> for Location {
 
 pub type QubitMap = HashMap<Qubit, Location>;
 
+pub type PatchMap = HashMap<Qubit, Patch>;
+
 impl Location {
     pub fn new(i: usize) -> Self {
         return Location(i);
@@ -124,6 +146,7 @@ pub enum PauliTerm {
 pub enum Operation {
     CX,
     T,
+    TComposite,
     PauliRot {
         axis: Vec<PauliTerm>,
         angle: (isize, usize),
@@ -132,13 +155,36 @@ pub enum Operation {
         sign: bool,
         axis: Vec<PauliTerm>,
     },
+    Move,
+    MoveRotate,
+    CultivateTX,
+    CultivateTZ,
+    S,
+    H,
+    HLitinski,
+    ResetToAncilla,
+    LitinskiRotate,
+    Id,
+    Walk
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub enum GateType {
     CX,
     T,
+    TComposite,
     PauliRot,
     PauliMeasurement,
+    Move,
+    MoveRotate,
+    CultivateTX,
+    CultivateTZ,
+    S,
+    H,
+    HLitinski,
+    ResetToAncilla,
+    LitinskiRotate,
+    Id,
+    Walk
 }
 
 #[derive(Clone, Debug, Eq, Hash, Serialize)]
@@ -151,7 +197,20 @@ pub struct Gate {
 impl Gate {
     fn filter_by_pauli_term(&self, term: &PauliTerm) -> Vec<Qubit> {
         match &self.operation {
-            Operation::CX | Operation::T => vec![],
+            Operation::CX
+            | Operation::S
+            | Operation::H
+            | Operation::HLitinski
+            | Operation::T
+            | Operation::TComposite
+            | Operation::Move
+            | Operation::MoveRotate
+            | Operation::Walk
+            | Operation::CultivateTX
+            | Operation::CultivateTZ
+            | Operation::ResetToAncilla
+            | Operation::LitinskiRotate
+            | Operation::Id => vec![],
             Operation::PauliRot { axis, .. } | Operation::PauliMeasurement { axis, .. } => (0
                 ..axis.len())
                 .filter(|i| axis[*i] == *term)
@@ -176,8 +235,20 @@ impl Gate {
         match &self.operation {
             Operation::CX => GateType::CX,
             Operation::T => GateType::T,
+            Operation::TComposite => GateType::TComposite,
             Operation::PauliRot { axis, angle } => GateType::PauliRot,
             Operation::PauliMeasurement { sign, axis } => GateType::PauliMeasurement,
+            Operation::Move => GateType::Move,
+            Operation::MoveRotate => GateType::MoveRotate,
+            Operation::Walk => GateType::Walk,
+            Operation::CultivateTX => GateType::CultivateTX,
+            Operation::CultivateTZ => GateType::CultivateTZ,
+            Operation::S => GateType::S,
+            Operation::H => GateType::H,
+            Operation::HLitinski => GateType::HLitinski,
+            Operation::ResetToAncilla => GateType::ResetToAncilla,
+            Operation::LitinskiRotate => GateType::LitinskiRotate,
+            Operation::Id => GateType::Id,
         }
     }
 }
@@ -278,7 +349,10 @@ pub trait GateImplementation: Clone + Serialize + Hash + Eq + Debug {}
 #[derive(Clone, Debug, Serialize)]
 pub struct Step<T: GateImplementation> {
     pub map: QubitMap,
+    pub patch_map: PatchMap,
     pub implemented_gates: HashSet<ImplementedGate<T>>,
+    pub counter_map: HashMap<usize, (ImplementedGate<T>, i64)>,
+    pub time: usize,
 }
 
 impl<G: GateImplementation> Step<G> {
@@ -288,7 +362,8 @@ impl<G: GateImplementation> Step<G> {
         arch: &A,
         implement_gate: &impl Fn(&Step<G>, &A, &Gate) -> I,
     ) {
-        assert!(self.implemented_gates.is_empty());
+        // Remove this assertion because transitions may be in the implemented_gates
+        // assert!(self.implemented_gates.is_empty());
         for gate in executable {
             let implementation = implement_gate(self, arch, gate).into_iter().next();
             match implementation {
@@ -313,24 +388,33 @@ impl<G: GateImplementation> Step<G> {
         routing_search_term_temp: f64,
         routing_search_cool_rate: f64,
     ) {
-        assert!(self.implemented_gates.is_empty());
+        // Remove this assertion because transitions may be in the implemented_gates
+        // assert!(self.implemented_gates.is_empty());
         let mut best_total_criticality = 0;
         let orders = executable.iter().cloned().permutations(executable.len());
         if executable.len() < CONFIG.exhaustive_search_threshold {
             for order in orders {
                 let mut step = Step {
                     map: self.map.clone(),
-                    implemented_gates: HashSet::new(),
+                    patch_map: self.patch_map.clone(),
+                    implemented_gates: self.implemented_gates.clone(),
+                    counter_map: self.counter_map.clone(),
+                    time: self.time,
                 };
+                let original_len = self.implemented_gates.len();
                 step.max_step(&order, arch, &implement_gate);
-                let candidate_total_criticality: usize =
-                    step.gates().into_iter().map(|x| crit_table[&x.id]).sum();
+                let candidate_total_criticality: usize = step
+                    .gates()
+                    .into_iter()
+                    // transition gates (like MOVE) will not be in crit_table
+                    .map(|x| crit_table.get(&x.id).unwrap_or(&0))
+                    .sum();
 
                 if candidate_total_criticality > best_total_criticality {
                     *self = step;
                     best_total_criticality = candidate_total_criticality;
                 }
-                if self.implemented_gates.len() == executable.len() {
+                if self.implemented_gates.len() == executable.len() + original_len {
                     return;
                 }
             }
@@ -338,13 +422,17 @@ impl<G: GateImplementation> Step<G> {
             let cost_function = |order: &Vec<Gate>| {
                 let mut step = Step {
                     map: self.map.clone(),
-                    implemented_gates: HashSet::new(),
+                    patch_map: self.patch_map.clone(),
+                    implemented_gates: self.implemented_gates.clone(),
+                    counter_map: self.counter_map.clone(),
+                    time: self.time,
                 };
                 step.max_step(&order, arch, &implement_gate);
                 return step
                     .gates()
                     .into_iter()
-                    .map(|x| crit_table[&x.id])
+                    // transition gates (like MOVE) will not be in crit_table
+                    .map(|x| crit_table.get(&x.id).unwrap_or(&0))
                     .sum::<usize>() as f64;
             };
             let random_neighbor = swap_random_array_elements;
@@ -358,7 +446,10 @@ impl<G: GateImplementation> Step<G> {
             );
             let mut step = Step {
                 map: self.map.clone(),
-                implemented_gates: HashSet::new(),
+                patch_map: self.patch_map.clone(),
+                implemented_gates: self.implemented_gates.clone(),
+                counter_map: self.counter_map.clone(),
+                time: self.time,
             };
             step.max_step(&best_order, arch, &implement_gate);
             *self = step;
@@ -401,6 +492,10 @@ impl<G: GateImplementation> Step<G> {
         return &self.map;
     }
 
+    pub fn patch_map(&self) -> &PatchMap {
+        return &self.patch_map;
+    }
+
     pub fn implemented_gates(&self) -> HashSet<ImplementedGate<G>> {
         return self.implemented_gates.clone();
     }
@@ -414,7 +509,11 @@ pub trait Transition<T: GateImplementation, A: Architecture> {
 
 pub trait Architecture {
     fn locations(&self) -> Vec<Location>;
+    fn anc_locations(&self) -> Vec<Location>;
+    fn patches(&self) -> Vec<Patch>;
+    fn initial_map(&self) -> Option<QubitMap>;
     fn graph(&self) -> (Graph<Location, ()>, HashMap<Location, NodeIndex>);
+    fn dims(&self) -> (usize, usize);
 }
 
 #[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq)]
@@ -428,4 +527,6 @@ pub struct CompilerResult<T: GateImplementation> {
     pub steps: Vec<Step<T>>,
     pub transitions: Vec<String>,
     pub cost: f64,
+    pub height: usize,
+    pub width: usize
 }

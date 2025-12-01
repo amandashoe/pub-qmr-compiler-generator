@@ -16,13 +16,33 @@ use std::time::Instant;
 use std::{collections::HashMap, fmt::Debug};
 
 fn random_map<T: Architecture>(c: &Circuit, arch: &T) -> QubitMap {
-    let mut map = HashMap::new();
+    let mut map = match arch.initial_map() {
+        None => HashMap::new(),
+        Some(m) => m,
+    };
+
     let mut rng = &mut rand::rng();
     let locations = arch.locations();
     let v = locations.choose_multiple(&mut rng, c.qubits.len());
-    for (q, l) in c.qubits.iter().zip(v) {
+
+    if map.is_empty() {
+        for (q, l) in c.qubits.iter().zip(v) {
+            map.insert(*q, *l);
+        }
+    }
+
+    let anc_qubits: Vec<Qubit> = arch
+        .patches()
+        .iter()
+        .filter(|p| p.patch_type == PatchType::ANCILLA)
+        .map(|p| p.qubit)
+        .collect();
+    let locations = arch.anc_locations();
+    let v = locations.choose_multiple(&mut rng, anc_qubits.len());
+    for (q, l) in anc_qubits.iter().zip(v) {
         map.insert(*q, *l);
     }
+
     return map;
 }
 
@@ -180,6 +200,7 @@ fn route<
     c: &Circuit,
     arch: &A,
     map: &QubitMap,
+    patch_map: &PatchMap,
     transitions: &impl Fn(&Step<G>) -> J,
     implement_gate: &impl Fn(&Step<G>, &A, &Gate) -> I,
     step_cost: fn(&Step<G>, &A) -> f64,
@@ -192,7 +213,10 @@ fn route<
     let mut trans_taken = Vec::new();
     let mut step_0 = Step {
         map: map.clone(),
+        patch_map: patch_map.clone(),
         implemented_gates: HashSet::new(),
+        counter_map: HashMap::new(),
+        time: 0,
     };
     let mut current_circ = c.clone();
     let mut cost = step_cost(&step_0, arch);
@@ -217,14 +241,16 @@ fn route<
         step_0.max_step(executable, arch, &implement_gate);
     }
     current_circ.remove_gates(&(step_0.gates()));
-    steps.push(step_0);
+    steps.push(step_0.clone());
+    let mut last_step = step_0;
     while current_circ.gates.len() > 0 {
+        println!("gates left: {}", current_circ.gates.len());
         let best = find_best_next_step(
             &current_circ,
             arch,
             &transitions,
             &implement_gate,
-            steps.last().unwrap(),
+            &last_step,
             step_cost,
             &map_eval,
             explore_routing_orders,
@@ -235,8 +261,12 @@ fn route<
             Some((s, trans, _b)) => {
                 current_circ.remove_gates(&s.gates());
                 cost += step_cost(&s, arch);
-                steps.push(s);
-                trans_taken.push(trans.repr());
+                last_step = s.clone();
+                println!("step {}", s.time);
+                let mut new_s = s.clone();
+                new_s.counter_map = HashMap::new();
+                new_s.patch_map = HashMap::new();
+                steps.push(new_s);
                 cost += trans.cost(arch);
             }
             None => {
@@ -244,10 +274,14 @@ fn route<
             }
         }
     }
+
+    let (h, w) = arch.dims();
     return CompilerResult {
         steps,
         transitions: trans_taken,
         cost,
+        height: h,
+        width: w,
     };
 }
 
@@ -272,6 +306,7 @@ fn find_best_next_step<
     let mut best_options = Vec::new();
     let mut best_cost = std::f64::MAX;
     let executable = c.layers().next().unwrap_or(vec![]);
+    // println!("executable: {:?}", executable);
     let next_layer = c.layers().next().unwrap_or(vec![]);
     let mut routing_search_cool_rate = CONFIG.routing_search_cool_rate;
     let routing_search_initial_temp = CONFIG.routing_search_initial_temp;
@@ -305,7 +340,8 @@ fn find_best_next_step<
         let total_criticality: usize = next_step
             .gates()
             .into_iter()
-            .map(|x| crit_table[&x.id])
+            // transition gates (like MOVE) will not be in crit_table
+            .map(|x| crit_table.get(&x.id).unwrap_or(&0))
             .sum();
         let weighted_vals = std::iter::zip(
             vec![CONFIG.alpha, CONFIG.beta, CONFIG.gamma, CONFIG.delta],
@@ -349,6 +385,10 @@ pub fn solve<
     explore_routing_orders: bool,
 ) -> CompilerResult<G> {
     let crit_table = &build_criticality_table(c);
+    let mut patch_map = HashMap::new();
+    for patch in arch.patches().clone() {
+        patch_map.insert(patch.qubit, patch);
+    }
     match mapping_heuristic {
         Some(heuristic) => {
             let map_h = |m: &QubitMap| heuristic(arch, c, m);
@@ -383,6 +423,7 @@ pub fn solve<
                 c,
                 arch,
                 &map,
+                &patch_map,
                 transitions,
                 &implement_gate,
                 step_cost,
@@ -398,6 +439,7 @@ pub fn solve<
                 c,
                 arch,
                 &map,
+                &patch_map,
                 transitions,
                 &implement_gate,
                 step_cost,
@@ -429,6 +471,10 @@ pub fn sabre_solve<
         Err(e) => panic!("Error writing config file {}", e),
     }
     let crit_table = &build_criticality_table(c);
+    let mut patch_map = HashMap::new();
+    for patch in arch.patches().clone() {
+        patch_map.insert(patch.qubit, patch);
+    }
     let mut map = match mapping_heuristic {
         Some(heuristic) => {
             let map_h = |m: &QubitMap| heuristic(arch, c, m);
@@ -472,6 +518,7 @@ pub fn sabre_solve<
                 circ,
                 arch,
                 &map,
+                &patch_map,
                 transitions,
                 &implement_gate,
                 step_cost,
@@ -487,6 +534,7 @@ pub fn sabre_solve<
         c,
         arch,
         &map,
+        &patch_map,
         transitions,
         &implement_gate,
         step_cost,
@@ -513,6 +561,10 @@ pub fn solve_with_cached_heuristic<
     explore_routing_orders: bool,
 ) -> CompilerResult<G> {
     let crit_table = &build_criticality_table(c);
+    let mut patch_map = HashMap::new();
+    for patch in arch.patches().clone() {
+        patch_map.insert(patch.qubit, patch);
+    }
     let mut map = match mapping_heuristic {
         Some(heuristic) => {
             let map_h = |m: &QubitMap| heuristic(arch, c, m);
@@ -558,6 +610,7 @@ pub fn solve_with_cached_heuristic<
                 circ,
                 arch,
                 &map,
+                &patch_map,
                 transitions,
                 &implement_gate,
                 step_cost,
@@ -573,6 +626,7 @@ pub fn solve_with_cached_heuristic<
         c,
         arch,
         &map,
+        &patch_map,
         transitions,
         &implement_gate,
         step_cost,
@@ -684,6 +738,10 @@ pub fn solve_joint_optimize<
     );
     let start_map = isom_map.unwrap_or_else(|| random_map(c, arch));
     let crit_table = &build_criticality_table(c);
+    let mut patch_map = HashMap::new();
+    for patch in arch.patches().clone() {
+        patch_map.insert(patch.qubit, patch);
+    }
     let route_h: Box<dyn Fn(&Circuit, &QubitMap) -> f64> =
         if let Some(ref heuristic) = mapping_heuristic {
             Box::new(move |c, m| heuristic(arch, c, m))
@@ -696,6 +754,7 @@ pub fn solve_joint_optimize<
         c,
         arch,
         &start_map,
+        &patch_map,
         transitions,
         &implement_gate,
         step_cost,
@@ -733,6 +792,7 @@ pub fn solve_joint_optimize<
             c,
             arch,
             &next,
+            &patch_map,
             transitions,
             &implement_gate,
             step_cost,
