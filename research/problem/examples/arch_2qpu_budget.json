@@ -18,6 +18,7 @@
     "bell_attempt_interval": 1.0,
     "max_bell_rate": 10.0,
     "code_distance": 20,
+    "t_cycle": 80.0,
 
     "_derived_check": {
         "_note": "These are computed values for human verification, not parsed by the runtime.",

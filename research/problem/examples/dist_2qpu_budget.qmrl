@@ -64,7 +64,11 @@ ArchInfo:
         bell_success_prob     : Float,
         bell_attempt_interval : Float,
         max_bell_rate         : Float,
-        code_distance         : Int
+        code_distance         : Int,
+
+        // Researcher-chosen QEC cycle time (must exceed syndrome_demand / R_Bell).
+        // budget = floor(R_Bell × t_cycle) - syndrome_demand
+        t_cycle               : Float
     }
     get_locations = Arch.alg_qubits()
 

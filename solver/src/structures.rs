@@ -463,6 +463,7 @@ mod tests {
         bell_attempt_interval: f64,
         max_bell_rate: f64,
         code_distance: usize,
+        t_cycle: f64,
     }
     impl MockArch {
         fn bell_pair_rate(&self) -> f64 {
@@ -499,6 +500,7 @@ mod tests {
             bell_attempt_interval: 1.0,
             max_bell_rate: 10.0,
             code_distance: 20,
+            t_cycle: 80.0,
         }
     }
 
@@ -534,19 +536,25 @@ mod tests {
     }
 
     #[test]
-    fn test_gate_bell_budget_zero_at_baseline() {
+    fn test_gate_bell_budget_zero_at_baseline_t_cycle() {
         let arch = sinclair_arch();
-        // t_cycle = syndrome_demand / R_Bell = 40 / 1.0 = 40 μs
-        // max_bell_pairs = floor(1.0 × 40) = 40
-        // budget = 40 - 40 = 0
-        let t_cycle = arch.syndrome_bell_demand() as f64 / arch.bell_pair_rate();
-        assert_eq!(arch.gate_bell_budget(t_cycle), 0);
+        // At baseline t_cycle = syndrome_demand / R_Bell = 40 / 1.0 = 40 μs:
+        // max_bell_pairs = floor(1.0 × 40) = 40, budget = 40 - 40 = 0
+        let baseline = arch.syndrome_bell_demand() as f64 / arch.bell_pair_rate();
+        assert_eq!(arch.gate_bell_budget(baseline), 0);
+    }
+
+    #[test]
+    fn test_gate_bell_budget_positive_with_t_cycle_80() {
+        let arch = sinclair_arch();
+        // t_cycle = 80 μs (user-supplied): budget = floor(1.0 × 80) - 40 = 40
+        assert_eq!(arch.gate_bell_budget(arch.t_cycle), 40);
     }
 
     // ── Budget deferral via max_step ─────────────────────────────────────────
 
-    /// Simulates the emitted budget wrapper: with budget=0, all remote gates
-    /// should be deferred (max_step implements zero gates).
+    /// Simulates the emitted budget wrapper: with baseline t_cycle (budget=0),
+    /// all remote gates should be deferred (max_step implements zero gates).
     #[test]
     fn test_budget_zero_defers_all_remote_gates() {
         let arch = sinclair_arch();
@@ -554,9 +562,9 @@ mod tests {
         let mut step = empty_step();
 
         let budgeted = |step: &Step<MockImpl>, arch: &MockArch, _gate: &Gate| -> Option<MockImpl> {
-            let bell_rate = arch.bell_pair_rate();
-            let t_cycle = arch.syndrome_bell_demand() as f64 / bell_rate;
-            let budget = arch.gate_bell_budget(t_cycle);
+            // Use baseline t_cycle (syndrome_demand / R_Bell = 40 μs) → budget=0
+            let baseline = arch.syndrome_bell_demand() as f64 / arch.bell_pair_rate();
+            let budget = arch.gate_bell_budget(baseline);
             let remote_count = step.implemented_gates.iter()
                 .filter(|g| g.implementation.remote())
                 .count();
@@ -565,23 +573,43 @@ mod tests {
         };
 
         step.max_step(&gates, &arch, &budgeted);
-        // budget=0 → every gate should be deferred
         assert_eq!(step.implemented_gates.len(), 0,
             "Expected all remote gates deferred with budget=0, but {} were implemented",
             step.implemented_gates.len());
     }
 
-    /// With budget=1, exactly one remote gate is scheduled per cycle.
+    /// With t_cycle=80 μs (user-supplied), budget=40 so all 3 gates schedule.
     #[test]
-    fn test_budget_one_allows_single_remote_gate() {
-        // Increase t_cycle so budget = floor(1.0 × 41) - 40 = 1
+    fn test_budget_forty_allows_all_remote_gates() {
         let arch = sinclair_arch();
         let gates = vec![cx_gate(0), cx_gate(1), cx_gate(2)];
         let mut step = empty_step();
 
         let budgeted = |step: &Step<MockImpl>, arch: &MockArch, _gate: &Gate| -> Option<MockImpl> {
-            let bell_rate = arch.bell_pair_rate();
-            // Use t_cycle = 41 μs → budget = floor(1.0×41) - 40 = 1
+            // arch.t_cycle = 80 μs → budget = floor(1.0×80) - 40 = 40
+            let budget = arch.gate_bell_budget(arch.t_cycle);
+            let remote_count = step.implemented_gates.iter()
+                .filter(|g| g.implementation.remote())
+                .count();
+            if remote_count >= budget { return None; }
+            Some(MockImpl { remote: true })
+        };
+
+        step.max_step(&gates, &arch, &budgeted);
+        assert_eq!(step.implemented_gates.len(), 3,
+            "Expected all 3 remote gates with budget=40, got {}",
+            step.implemented_gates.len());
+    }
+
+    /// With budget=1 (t_cycle=41 μs), exactly one remote gate is scheduled per cycle.
+    #[test]
+    fn test_budget_one_allows_single_remote_gate() {
+        let arch = sinclair_arch();
+        let gates = vec![cx_gate(0), cx_gate(1), cx_gate(2)];
+        let mut step = empty_step();
+
+        let budgeted = |step: &Step<MockImpl>, arch: &MockArch, _gate: &Gate| -> Option<MockImpl> {
+            // t_cycle = 41 μs → budget = floor(1.0×41) - 40 = 1
             let budget = arch.gate_bell_budget(41.0);
             let remote_count = step.implemented_gates.iter()
                 .filter(|g| g.implementation.remote())

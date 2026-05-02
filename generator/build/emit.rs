@@ -565,8 +565,8 @@ fn emit_realize_gate_function(imp: &ImplBlock) -> TokenStream {
     }
 }
 
-/// Returns true when all five Bell pair hardware fields and a `remote` field
-/// on GateRealization are present — i.e., budget enforcement should be active.
+/// Returns true when all Bell pair hardware fields (including t_cycle) and a `remote`
+/// field on GateRealization are present — i.e., budget enforcement should be active.
 fn has_bell_budget(arch: &Option<ArchitectureBlock>, imp: &ImplBlock) -> bool {
     match arch {
         Some(a) => {
@@ -575,6 +575,7 @@ fn has_bell_budget(arch: &Option<ArchitectureBlock>, imp: &ImplBlock) -> bool {
                 && arch_has_field(a, "bell_attempt_interval")
                 && arch_has_field(a, "max_bell_rate")
                 && arch_has_field(a, "code_distance")
+                && arch_has_field(a, "t_cycle")
                 && impl_has_field(&imp.data, "remote")
         }
         None => false,
@@ -594,7 +595,14 @@ fn emit_budget_wrapper_call(backend_fn: &str, explore_orders: bool) -> TokenStre
                         Check hardware parameters (bell_success_prob, bell_attempt_interval, \
                         max_bell_rate). Remote gates cannot be scheduled.");
             }
-            let t_cycle = arch.syndrome_bell_demand() as f64 / bell_rate;
+            let t_cycle = arch.t_cycle;
+            let min_viable = arch.syndrome_bell_demand() as f64 / bell_rate;
+            if t_cycle < min_viable {
+                panic!("t_cycle ({} μs) is shorter than the minimum viable cycle time \
+                        ({} μs = syndrome_demand / R_Bell). No Bell pair budget remains for \
+                        inter-module gates. Increase t_cycle in the arch JSON.",
+                        t_cycle, min_viable);
+            }
             let budget = arch.gate_bell_budget(t_cycle);
             let remote_count = step.implemented_gates.iter()
                 .filter(|g| g.implementation.remote())
