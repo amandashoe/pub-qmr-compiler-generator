@@ -26,7 +26,6 @@ pub fn emit_program(p: &ProblemDefinition) -> TokenStream {
     let implement_trans_trait = emit_impl_trans(&p.trans, &p.imp);
     let define_available_transitions = emit_available_transitions(&p.trans, &p.imp);
     let define_realize_gate_function = emit_realize_gate_function(&p.imp);
-    let define_is_remote_function = emit_is_remote_function(&p.imp);
     let define_solve_function = emit_solve_function(&p.imp, &p.arch);
     let define_sabre_solve_function = emit_sabre_solve_function(&p.imp, &p.arch);
     let define_joint_solve_parallel_function =
@@ -41,7 +40,6 @@ pub fn emit_program(p: &ProblemDefinition) -> TokenStream {
         #define_transition_struct
         #implement_gi_trait
         #implement_gi_getters
-        #define_is_remote_function
         #implement_arch_trait
         #implement_arch_methods
         #implement_trans_trait
@@ -282,10 +280,6 @@ fn emit_impl_arch(arch: &Option<ArchitectureBlock>) -> TokenStream {
     }};
 }
 
-fn impl_has_field(imp: &NamedTuple, name: &str) -> bool {
-    imp.fields.iter().any(|(n, _)| n == name)
-}
-
 fn emit_impl_arch_methods(arch: &Option<ArchitectureBlock>) -> TokenStream {
     let struct_name = syn::Ident::new("CustomArch", Span::call_site());
     let getters = match arch {
@@ -415,20 +409,6 @@ fn emit_available_transitions(t: &TransitionBlock, imp: &ImplBlock) -> TokenStre
             fn available_transitions(arch : &CustomArch, step : &Step<CustomRealization>) -> Vec<CustomTransition> {
                #available_trans_expr
             }
-    }
-}
-
-/// Emits `fn is_remote(r: &CustomRealization) -> bool` when GateRealization
-/// has a `remote : Bool` field, enabling the design-doc usage pattern
-/// `if is_remote(x.implementation)`.
-fn emit_is_remote_function(imp: &ImplBlock) -> TokenStream {
-    if !impl_has_field(&imp.data, "remote") {
-        return quote! {};
-    }
-    quote! {
-        fn is_remote(r: &CustomRealization) -> bool {
-            r.remote()
-        }
     }
 }
 
