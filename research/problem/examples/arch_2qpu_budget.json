@@ -8,6 +8,18 @@
 
     "num_qpus": 2,
     "qpu_sizes": [5, 5],
+    "same_qpu": [
+        [0, 1, 2, 3, 4],
+        [0, 1, 2, 3, 4],
+        [0, 1, 2, 3, 4],
+        [0, 1, 2, 3, 4],
+        [0, 1, 2, 3, 4],
+        [5, 6, 7, 8, 9],
+        [5, 6, 7, 8, 9],
+        [5, 6, 7, 8, 9],
+        [5, 6, 7, 8, 9],
+        [5, 6, 7, 8, 9]
+    ],
     "link_cost": 1.0,
     "comm_qubits": [4, 5],
     "alg_qubits": [0, 1, 2, 3, 6, 7, 8, 9],
@@ -19,6 +31,7 @@
     "max_bell_rate": 10.0,
     "code_distance": 20,
     "t_cycle": 80.0,
+    "gate_bell_budget": 40,
 
     "_derived_check": {
         "_note": "These are computed values for human verification, not parsed by the runtime.",
