@@ -10,3 +10,5 @@
 memlog.txt
 rustc-time.sh
 generator/debug
+config_full.json
+generated-solvers/
