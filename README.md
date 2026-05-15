@@ -13,7 +13,7 @@ Think of Amaro as **yacc/bison for quantum computing** which helps you write hig
 ## Who Is This For?
 
 
-    - **Applications and algorithms researchers:** Obtain resource estimates for a range of target devices
+- **Applications and algorithms researchers:** Obtain resource estimates for a range of target devices
 - **Architecture researchers:** Rapidly prototype and evaluate new device architectures with building a compiler from scratch
 - **Compiler researchers:** Test generalizable algorithmic improvements by modifying Amaro's core solver
 ---
