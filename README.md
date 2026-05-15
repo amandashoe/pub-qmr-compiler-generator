@@ -12,18 +12,17 @@ Think of Amaro as **yacc/bison for quantum computing** which helps you write hig
 
 ## Who Is This For?
 
-- **Quantum compiler researchers** building routing algorithms
-- **Systems researchers** working on quantum-classical interfaces
-- **PhD students** prototyping new quantum architectures
-- **Hardware teams** needing custom compilers for novel devices
 
+    - **Applications and algorithms researchers:** Obtain resource estimates for a range of target devices
+- **Architecture researchers:** Rapidly prototype and evaluate new device architectures with building a compiler from scratch
+- **Compiler researchers:** Test generalizable algorithmic improvements by modifying Amaro's core solver
 ---
 
 ## What Problem Does This Solve?
 
-Quantum computers have physical constraints. Not every qubit can interact with every other qubit. Running a quantum algorithm requires "routing" operations around these limitations, similar to how GPS routes around road closures.
+Quantum computers have physical constraints. Not every qubit can interact with every other qubit. Running a quantum algorithm requires "routing" operations around these limitations.
 
-**The Challenge:** Every quantum architecture (NISQ, surface code, trapped ions, Rydberg atoms) has different constraints and requires different routing strategies. Writing custom compilers for each is tedious and error-prone.
+**The Challenge:** Every quantum architecture (NISQ vs. FTQC, superconducting vs. trapped ions vs. Rydberg atoms) has different constraints and requires different routing strategies. Writing custom compilers for each is tedious and error-prone.
 
 **Amaro's Solution:** Describe your architecture's constraints and routing logic in ~50 lines of declarative code. Amaro generates a full compiler with optimized search algorithms.
 
@@ -126,7 +125,7 @@ TransitionInfo:
 - **apply**: Execute the transition (swap qubit locations)
 - **cost**: How expensive the transition is (0 for identity, 1 for actual SWAPs)
 
-> **Key Concept:** `TransitionInfo.cost` defines the cost of *moving between configurations* (e.g., performing a SWAP), while `StateInfo.cost` (below) defines the cost of *being in a specific configuration*.
+> **Key Concept:** `TransitionInfo.cost` defines the cost of *moving between configurations* (e.g., performing a SWAP), while `StateInfo.cost` (below) defines the cost of *being in a specific configuration*. Depending on the target architecture, one may be a more natural cost model than the other.
 
 ### 3. ArchInfo - Hardware Parameters
 
@@ -154,8 +153,7 @@ StateInfo:
     cost = 1.0
 ```
 
-> **StateInfo vs TransitionInfo:** In NISQ, transitions (SWAPs) are expensive while states are cheap. In surface code, executing operations in a given layout (state) is expensive, but moving qubits (transitions) is relatively cheap. This distinction lets you model different cost profiles accurately.
-
+> **StateInfo vs TransitionInfo:** In the NISQ superconducting case, we are interested in minimizing the number of transitions (SWAPs). In the surface code case study, we minimize the number of states (~ the number of surface code cycles).
 ---
 
 ## Complete Examples
@@ -183,7 +181,7 @@ StateInfo:
     cost = 0.0
 ```
 
-### Surface Code (Path-Based with Magic States)
+### Surface Code (Path-Based Lattice Surgery Routing with Magic States)
 
 See `problem-descriptions/scmr.qmrl` for a full example with path-based routing, magic state integration, and avoiding previously implemented gates.
 
@@ -257,23 +255,12 @@ Amaro algorithm from [Molavi et al.](https://arxiv.org/pdf/2508.10781). Optimize
 
 ---
 
-## Advanced: Embedding Rust
+## Amaro as a Rust Library 
 
-For complex cost functions or constraints that are difficult to express in the DSL, embed Rust directly:
 
-```amaro
-{{
-    fn custom_cost(step: &Step, arch: &Arch) -> f64 {
-        // Complex physics calculations
-        // Access to full Rust ecosystem
-    }
-}}
-
-StateInfo:
-    cost = custom_cost(State, Arch)
-```
-
-The embedded Rust has access to the full solver API and standard library.
+For complex cost functions or constraints that are difficult to express in the DSL, it may be preferable to interact with Amaro as a Rust library.
+This involves providing the same information as an Amaro source file by implementing a few interfaces, then calling an Amaro solve function. 
+See the ``builtin/`` directory for examples.
 
 ---
 
@@ -333,7 +320,7 @@ If you use Amaro in your research, please cite:
 
 ## References
 
-1. Abtin Molavi, Amanda Xu, Ethan Cecchetti, Swamit Tannu, Aws Albarghouthi. "[Generating Compilers for Qubit Mapping and Routing](https://arxiv.org/pdf/2508.10781)" (2024)
+1. Abtin Molavi, Amanda Xu, Ethan Cecchetti, Swamit Tannu, Aws Albarghouthi. "[Generating Compilers for Qubit Mapping and Routing](https://arxiv.org/pdf/2508.10781)" (2026)
 
 2. Gushu Li, Yufei Ding, Yuan Xie. "[Tackling the Qubit Mapping Problem for NISQ-Era Quantum Devices](https://arxiv.org/abs/1809.02573)" (2019)
 
