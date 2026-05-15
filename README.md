@@ -235,7 +235,7 @@ qmr-compiler-generator/
 │   ├── ilq.qmrl            # Interleaved lattice qubits
 │   └── mqlss.qmrl          # Magic state lattice surgery
 ├── generated-solvers/      # Output directory for compiled solvers
-└── builtin/                # Benchmark circuits and tests
+└── builtin/                # Rust descriptions for various architectures
 ```
 
 ---
