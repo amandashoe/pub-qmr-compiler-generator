@@ -43,7 +43,6 @@ graph LR
 
 ### Prerequisites
 - **Rust** 1.90.0 or later ([install](https://rustup.rs))
-- **Python** 3.8+ (for benchmark scripts)
 - Bash shell
 
 ### Installation
@@ -278,12 +277,6 @@ Or search "Amaro Quantum Routing DSL" in the VS Code Extensions marketplace.
 
 ## Troubleshooting
 
-**Python version issues:**
-
-Add to `~/.bashrc`, `~/.bash_profile`, or `~/.zshrc`:
-```bash
-alias python=python3
-```
 
 **Cargo version too old:**
 ```bash
